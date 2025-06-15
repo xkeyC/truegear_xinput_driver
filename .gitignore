@@ -1,3 +1,5 @@
 /target
 /truegear_xinput_driver.exe
+/truegear_xinput_driver_*.zip
 /xinput_hook.dll
+.idea

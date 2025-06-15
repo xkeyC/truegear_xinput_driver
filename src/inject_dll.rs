@@ -47,6 +47,36 @@ static TRUE_GEAR_CLIENT: OnceCell<tokio::sync::Mutex<Option<true_gear::TrueGearC
 // 日志文件常量
 const LOG_FILE_NAME: &str = "truegear_xinput_hook_debug.txt";
 
+// DLL入口点
+#[no_mangle]
+pub unsafe extern "stdcall" fn DllMain(
+    _hinst_dll: HINSTANCE,
+    fdw_reason: DWORD,
+    _lpv_reserved: LPVOID,
+) -> BOOL {
+    const DLL_PROCESS_ATTACH: u32 = 1;
+
+    match fdw_reason {
+        DLL_PROCESS_ATTACH => {
+            INIT.call_once(|| {
+                log_message("XInput Hook DLL 已加载到进程中");
+                // 安装Hook
+                if install_memory_hook() {
+                    log_message("XInput Hook 安装成功");
+                    let _ = tokio::task::block_in_place(|| async {
+                        let _ = init_true_gear_client().await;
+                    });
+                } else {
+                    log_message("XInput Hook 安装失败");
+                }
+            });
+
+            TRUE
+        }
+        _ => TRUE,
+    }
+}
+
 // 异步写入日志消息
 async fn log_message_async(message: &str) {
     use tokio::fs::OpenOptions;
@@ -194,7 +224,7 @@ unsafe fn install_jump_hook(target: *mut u8, hook_func: *const u8) -> bool {
     // 写入跳转代码
     for i in 0..12 {
         *target.add(i) = jump_code[i];
-    }    // 恢复内存保护
+    } // 恢复内存保护
     VirtualProtect(target as *mut _, 12, old_protect, &mut old_protect);
 
     true
@@ -298,7 +328,7 @@ unsafe fn call_original_function(user_index: u32, vibration: *const XInputVibrat
 fn on_vibration_event(controller: u32, left: u16, right: u16) {
     // 检查是否已超过最大日志数量限制
     let current_count = VIBRATION_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    
+
     if current_count < MAX_VIBRATION_LOGS {
         let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
         let vibration_log = format!(
@@ -314,61 +344,14 @@ fn on_vibration_event(controller: u32, left: u16, right: u16) {
         log_message(&vibration_log);
     } else if current_count == MAX_VIBRATION_LOGS {
         // 到达限制时记录一条消息
-        log_message(&format!("震动日志已达到最大数量 ({}), 后续震动事件将不再记录到日志", MAX_VIBRATION_LOGS));
+        log_message(&format!(
+            "震动日志已达到最大数量 ({}), 后续震动事件将不再记录到日志",
+            MAX_VIBRATION_LOGS
+        ));
     }
-    
+
     // 无论是否记录日志，都继续发送震动到TrueGear
     send_vibration_to_truegear(controller, left, right);
-}
-
-// DLL入口点
-#[no_mangle]
-pub unsafe extern "stdcall" fn DllMain(
-    _hinst_dll: HINSTANCE,
-    fdw_reason: DWORD,
-    _lpv_reserved: LPVOID,
-) -> BOOL {
-    const DLL_PROCESS_ATTACH: u32 = 1;
-
-    match fdw_reason {
-        DLL_PROCESS_ATTACH => {
-            INIT.call_once(|| {
-                log_message("XInput Hook DLL 已加载到进程中");
-                // 安装Hook
-                if install_memory_hook() {
-                    log_message("XInput Hook 安装成功");
-                    let _ = tokio::task::block_in_place(|| async {
-                        let _ = init_true_gear_client().await;
-                    });
-                } else {
-                    log_message("XInput Hook 安装失败");
-                }
-            });
-
-            TRUE
-        }
-        _ => TRUE,
-    }
-}
-
-// 导出函数：模拟震动事件（用于测试）
-#[no_mangle]
-pub extern "stdcall" fn simulate_vibration(controller: u32, left: u16, right: u16) {
-    on_vibration_event(controller, left, right);
-}
-
-// 导出函数：检查Hook状态
-#[no_mangle]
-pub extern "stdcall" fn is_hook_active() -> bool {
-    unsafe { HOOK_INSTALLED }
-}
-
-// 添加一个简单的测试函数来验证Hook是否工作
-#[no_mangle]
-pub extern "stdcall" fn test_hook() {
-    log_message("测试Hook函数被调用");
-    // 模拟一个震动事件来测试日志系统
-    on_vibration_event(0, 32768, 16384);
 }
 
 // 安全地发送震动到TrueGear
@@ -390,12 +373,14 @@ async fn send_vibration_to_truegear_async(_: u32, left: u16, right: u16) {
 
             let mut tracks = Vec::new();
 
+            const SHAKE_DURATION: Option<i32> = Some(100); // 震动持续时间 ms
+
             // 处理左侧震动
             if left_intensity > 0 {
-                let left_zones = get_left_vibration_zones(left_intensity);
+                let left_zones = get_vibration_zones(left_intensity, VibrationSide::Left);
                 if !left_zones.is_empty() {
                     let left_track = true_gear::def::TrackObject::new_shake_duration(
-                        Some(200), // 震动持续时间 200ms
+                        SHAKE_DURATION,
                         Some(left_intensity),
                         Some(left_intensity),
                         Some(true_gear::def::IntensityMode::Const),
@@ -407,10 +392,10 @@ async fn send_vibration_to_truegear_async(_: u32, left: u16, right: u16) {
 
             // 处理右侧震动
             if right_intensity > 0 {
-                let right_zones = get_right_vibration_zones(right_intensity);
+                let right_zones = get_vibration_zones(right_intensity, VibrationSide::Right);
                 if !right_zones.is_empty() {
                     let right_track = true_gear::def::TrackObject::new_shake_duration(
-                        Some(200), // 震动持续时间 200ms
+                        SHAKE_DURATION,
                         Some(right_intensity),
                         Some(right_intensity),
                         Some(true_gear::def::IntensityMode::Const),
@@ -447,18 +432,18 @@ fn get_vibration_zones(intensity_percent: i32, side: VibrationSide) -> Vec<i32> 
 
     // 根据强度百分比决定激活的区域数量
     let zone_count = match intensity_percent {
-        0..=20 => 1,  // 低强度：只激活最外侧
-        21..=40 => 2, // 中低强度：激活外侧两列
-        41..=60 => 3, // 中等强度：激活外侧三列
-        61..=80 => 4, // 中高强度：激活外侧四列
-        _ => 5,       // 高强度：激活所有列
+        0..=40 => 1,   // 低强度：只激活最外侧
+        41..=60 => 2,  // 中低强度：激活外侧两列
+        61..=80 => 3,  // 中等强度：激活外侧三列
+        81..=100 => 4, // 中高强度：激活外侧四列
+        _ => 5,        // 高强度：激活所有列
     };
 
     // 根据侧边决定激活顺序
     for line in 0..5 {
         for col in 0..zone_count.min(4) {
             let front_index = match side {
-                VibrationSide::Left => line * 4 + col,        // 左侧：从最左边开始激活
+                VibrationSide::Left => line * 4 + col, // 左侧：从最左边开始激活
                 VibrationSide::Right => line * 4 + (3 - col), // 右侧：从最右边开始激活
             };
 
@@ -470,14 +455,4 @@ fn get_vibration_zones(intensity_percent: i32, side: VibrationSide) -> Vec<i32> 
     }
 
     zones
-}
-
-// 获取左侧震动区域（兼容性保持函数）
-fn get_left_vibration_zones(intensity_percent: i32) -> Vec<i32> {
-    get_vibration_zones(intensity_percent, VibrationSide::Left)
-}
-
-// 获取右侧震动区域（兼容性保持函数）
-fn get_right_vibration_zones(intensity_percent: i32) -> Vec<i32> {
-    get_vibration_zones(intensity_percent, VibrationSide::Right)
 }

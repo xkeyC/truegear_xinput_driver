@@ -51,7 +51,7 @@ fn main() {
 
     setup_console();
     
-    info!("🚀 TrueGear XInput Driver");
+    info!("🚀 TrueGear XInput Driver v0.0.2");
     info!("开发者：xkeyC 3334969096@qq.com");
     info!("本项目使用GPL协议开源于 GitHub: https://github.com/xkeyC/truegear_xinput_driver");
     info!("在选择游戏前，请确保 Truegear_Player 正在运行，请谨慎在带有反作弊的游戏中使用此程序 ...");
