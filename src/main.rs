@@ -113,6 +113,11 @@ fn is_game_process(process_name: &str, process_path: &str) -> bool {
     if lower_path.contains("steamapps\\common") {
         return true;
     }
+
+    // Xbox PC 游戏
+    if lower_path.contains("xboxgames") {
+        return true;
+    }
     
     false
 }
