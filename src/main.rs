@@ -51,11 +51,10 @@ fn main() {
 
     setup_console();
     
-    info!("🚀 TrueGear XInput Driver v0.0.2");
+    info!("🚀 TrueGear XInput Driver v0.0.3");
     info!("开发者：xkeyC 3334969096@qq.com");
-    info!("本项目使用GPL协议开源于 GitHub: https://github.com/xkeyC/truegear_xinput_driver");
-    info!("在选择游戏前，请确保 Truegear_Player 正在运行，请谨慎在带有反作弊的游戏中使用此程序 ...");
-    info!("正在扫描运行中的游戏进程...");
+    info!("本项目使用 GPLv3协议 开源于 GitHub: https://github.com/xkeyC/truegear_xinput_driver");
+    info!("在选择游戏进程前，请确保 Truegear_Player 正在运行，请谨慎在带有反作弊的游戏中使用此程序 ...");
     
     // 设置Ctrl+C处理
     ctrlc::set_handler(move || {
@@ -404,8 +403,7 @@ fn wait_for_user_input(message: &str) {
 
 // 持续监控震动的循环
 fn start_vibration_monitoring(process: &GameProcess) {
-    println!("\n🚀 开始监控进程: {} (PID: {})", process.name, process.pid);
-    println!("💡 提示: 按 Ctrl+C 停止监控并退出程序");
+    println!("\n🚀 正在等待进程结束: {} (PID: {})", process.name, process.pid);
     
     // 监控循环
     let mut last_check = std::time::Instant::now();
